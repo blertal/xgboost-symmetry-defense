@@ -1,0 +1,15 @@
+{
+  "num_threads": 20,
+  "enable_early_return": true,
+  "inputs": "inverted/data/HIGGS_s.test0",
+  "model":      "inverted/models/HIGGS_orig.json",
+  "inv_model":  "inverted/models/HIGGS_inv.json",
+  "both_model": "inverted/models/HIGGS_both.json",
+  "num_classes": 2,
+  "num_features": 28,
+  "feature_start": 0,
+  "num_point": 500,
+  "num_attack_per_point": 20,
+  "norm_type": -1,
+  "search_mode": "milp"
+}

@@ -1,0 +1,15 @@
+{
+  "num_threads": 20,
+  "enable_early_return": true,
+  "inputs": "inverted/data/diabetes_scale0.test",
+  "model":      "inverted/models/diabetes_orig.json",
+  "inv_model":  "inverted/models/diabetes_inv.json",
+  "both_model": "inverted/models/diabetes_both.json",
+  "num_classes": 2,
+  "num_features": 8,
+  "feature_start": 0,
+  "num_point": 154,
+  "num_attack_per_point": 20,
+  "norm_type": -1,
+  "search_mode": "cube"
+}

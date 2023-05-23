@@ -1,0 +1,15 @@
+{
+  "num_threads": 20,
+  "enable_early_return": true,
+  "inputs": "inverted/data/breast_cancer_scale0.test",
+  "model":      "inverted/models/breast_cancer_orig.json",
+  "inv_model":  "inverted/models/breast_cancer_inv.json",
+  "both_model": "inverted/models/breast_cancer_both.json",
+  "num_classes": 2,
+  "num_features": 10,
+  "feature_start": 0,
+  "num_point": 137,
+  "num_attack_per_point": 20,
+  "norm_type": 2,
+  "search_mode": "hsja"
+}

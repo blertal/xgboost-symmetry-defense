@@ -1,0 +1,14 @@
+{
+  "num_threads": 20,
+  "inputs": "inverted/data/fashion.test0",
+  "model":      "inverted/models/fashion_subgroup.json",
+  "inv_model":  "inverted/models/fashion_subgroup.json",
+  "both_model": "inverted/models/fashion_subgroup.json",
+  "num_classes": 10,
+  "num_features": 784,
+  "feature_start": 0,
+  "num_point": 500,
+  "num_attack_per_point": 20,
+  "norm_type": -1,
+  "search_mode": "opt"
+}

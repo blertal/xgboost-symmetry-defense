@@ -1,0 +1,15 @@
+{
+  "num_threads": 20,
+  "enable_early_return": true,
+  "inputs": "inverted/data/ijcnn1s0.t",
+  "model":      "inverted/models/ijcnn_orig.json",
+  "inv_model":  "inverted/models/ijcnn_inv.json",
+  "both_model": "inverted/models/ijcnn_both.json",
+  "num_classes": 2,
+  "num_features": 22,
+  "feature_start": 0,
+  "num_point": 500,
+  "num_attack_per_point": 20,
+  "norm_type": -1,
+  "search_mode": "opt"
+}

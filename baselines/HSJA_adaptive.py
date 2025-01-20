@@ -4,6 +4,10 @@
 
 from __future__ import absolute_import, division, print_function
 import numpy as np
+import torch
+from torchvision import transforms
+
+hflip = transforms.RandomHorizontalFlip(p=1.0)
 
 class HSJA(object):
     def __init__(self,model,constraint=2,inverted=False,num_iterations=40,gamma=1.0,stepsize_search='geometric_progression',max_num_evals=1e4,init_num_evals=100, verbose=True):
@@ -19,7 +23,10 @@ class HSJA(object):
 
     def hsja(self,input_xi,label_or_target,initial_xi,TARGETED):
     
-        if (self.model.predict_label(input_xi) != label_or_target):
+        if self.symm_predict(input_xi) != label_or_target: #####self.model.predict_label(input_xi) != label_or_target):
+        #print(self.model.predict_label(input_xi))
+        #exit()
+        #if self.model.predict_label(input_xi) != label_or_target:
             print("Fail to classify the image. No need to attack.")
             return (False, None)
 
@@ -31,7 +38,6 @@ class HSJA(object):
                 theta = self.gamma / (np.sqrt(d) * d)
         else:
                 theta = self.gamma / (d ** 2)
-
 
         # Initialize.
         perturbed = self.initialize(input_xi, label_or_target, initial_xi, TARGETED)
@@ -60,9 +66,15 @@ class HSJA(object):
                 num_evals = int(self.init_num_evals * np.sqrt(j+1))
                 num_evals = int(min([num_evals, self.max_num_evals]))
 
+                flipped_xi = np.reshape(perturbed, (1, 1, 28, 28))
+                flipped_xi = torch.from_numpy(flipped_xi)
+                flipped_xi = hflip(flipped_xi)
+                flipped_xi = flipped_xi.cpu().detach().numpy()
+                flipped_xi = np.reshape(flipped_xi, (28*28))
+
                 # approximate gradient.
-                gradf = self.approximate_gradient(perturbed, label_or_target, num_evals,
-                        delta, TARGETED)
+                gradf = self.approximate_gradient(perturbed, label_or_target, num_evals, delta, TARGETED) + self.approximate_gradient(flipped_xi, label_or_target, num_evals, delta, TARGETED) + self.approximate_gradient(1.0-perturbed, label_or_target, num_evals, delta, TARGETED) + self.approximate_gradient(1.0-flipped_xi, label_or_target, num_evals, delta, TARGETED)
+                
                 if self.constraint == np.inf:
                         update = np.sign(gradf)
                 else:
@@ -102,6 +114,50 @@ class HSJA(object):
 
         return (True, perturbed)
 
+    def symm_predict(self, x0):
+    
+        #print('mmm', x0.shape[0])
+        
+        if x0.shape[0] == 784:
+            x0 = x0.reshape((1,784))
+    
+        #print('mmm', self.model.predict_label(x0))
+        #print('mmm', preds.shape, x0.shape)
+        
+        flipped_x0 = np.reshape(x0, (x0.shape[0], 1, 28, 28))
+        flipped_x0 = torch.from_numpy(flipped_x0)
+        flipped_x0 = hflip(flipped_x0)
+        flipped_x0 = flipped_x0.cpu().detach().numpy()
+        flipped_x0 = np.reshape(flipped_x0, (x0.shape[0],28*28))
+        
+        preds             = self.model.predict_label(x0)
+        preds_flipped     = self.model.predict_label(flipped_x0)
+        preds_inv         = self.model.predict_label(1.0-x0)
+        preds_inv_flipped = self.model.predict_label(1.0-flipped_x0)
+        
+        symm_preds = []
+        for ii in range(x0.shape[0]):
+            if (preds[ii] == preds_flipped[ii]) or (preds[ii] == preds_inv[ii]) or (preds[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds[ii])
+            elif (preds_flipped[ii] == preds_inv[ii]) or (preds_flipped[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_flipped[ii])
+            elif (preds_inv[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_inv[ii])
+            else:
+                rand_no = np.random.randint(0, 4)
+                if rand_no == 0:
+                    symm_preds.append(preds[ii])
+                elif rand_no == 1:
+                    symm_preds.append(preds_flipped[ii])
+                elif rand_no == 2:
+                    symm_preds.append(preds_inv[ii])
+                elif rand_no == 3:
+                    symm_preds.append(preds_inv_flipped[ii])
+
+        symm_preds = np.asarray(symm_preds)
+        return symm_preds
+
+
     def decision_function(self, images, label, TARGETED):
             """
             Decision function output 1 on the desired side of the boundary,
@@ -109,9 +165,14 @@ class HSJA(object):
             """
             # images = torch.from_numpy(images).float().cuda()
             assert images is not None
+            
+            #print(images.shape)
+            
 
-            la = self.model.predict_label(images)
-            #print(la,label)
+            la = self.symm_predict(images)  ##### self.model.predict_label(images)
+            #la = self.model.predict_label(images)
+            
+            #print('qqq',la,label)
             # la = la.cpu().numpy()
 
             if TARGETED:

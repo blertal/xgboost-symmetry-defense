@@ -6,6 +6,10 @@ import time
 import numpy as np
 from numpy import linalg as LA
 import random
+import torch
+from torchvision import transforms
+
+hflip = transforms.RandomHorizontalFlip(p=1.0)
 
 def mulvt(v,t):
 ##################################
@@ -37,10 +41,17 @@ class OPT_attack_lf(object):
         """
         model = self.model
         # y0 = y0[0]
-        if (model.predict_label(x0) != y0):
+        if (self.symm_predict(x0) != y0):
             print("Fail to classify the image. No need to attack.")
             return (False, x0)
 
+        flipped_x0 = np.reshape(x0, (1, 1, 28, 28))
+        flipped_x0 = torch.from_numpy(flipped_x0)
+        flipped_x0 = hflip(flipped_x0)
+        flipped_x0 = flipped_x0.cpu().detach().numpy()
+        flipped_x0 = np.reshape(flipped_x0, (28*28))
+
+        # ORIGINAL
         num_directions = 100
         best_theta, g_theta = None, float('inf')
         query_count = 0
@@ -49,7 +60,7 @@ class OPT_attack_lf(object):
         for i in range(num_directions):
             query_count += 1
             theta = np.random.randn(*x0.shape)
-            if model.predict_label(x0+theta)!=y0:
+            if self.symm_predict(x0+theta)!=y0:
                 #l2norm = self.norm(theta)
                 initial_lbd = self.norm(theta.flatten())
                 theta /= initial_lbd     # might have problem on the defination of direction
@@ -65,12 +76,12 @@ class OPT_attack_lf(object):
                 query_count += 1
                 theta = np.random.uniform(-1, 1, *x0.shape)
                 # theta = np.random.randn(*x0.shape)
-                if model.predict_label(x0+theta)!=y0:
+                if self.symm_predict(x0+theta)!=y0:
                     initial_lbd = self.norm(theta)
                     theta /= initial_lbd
                     lbd, count = self.fine_grained_binary_search(model, x0, y0, theta, initial_lbd, g_theta)
                     query_count += count
-                    if lbd < g_theta:
+                    if lbd < g_theta_1:
                         best_theta, g_theta = theta, lbd
                         print("--------> Found distortion %.4f in uniform generator %d" % (g_theta, i))
                         break
@@ -83,13 +94,17 @@ class OPT_attack_lf(object):
         print("==========> Found best distortion %.4f in %.4f seconds using %d queries" % (g_theta, timeend-timestart, query_count))
 
         timestart = time.time()
-        g1 = 1.0
+        g1_1 = 1.0
+        g1_2 = 1.0
+        g1_3 = 1.0
+        g1_4 = 1.0
         theta, g2 = best_theta, g_theta
         opt_count = 0
         stopping = 0.005
         prev_obj = 100000
         for i in range(iterations):
-            gradient = np.zeros(theta.shape)
+                
+            gradient_1 = np.zeros(theta.shape)
             q = 5
             min_g1 = float('inf')
             for _ in range(q):
@@ -97,17 +112,66 @@ class OPT_attack_lf(object):
                 u /= self.norm(u.flatten())
                 ttt = theta+beta * u
                 ttt /= self.norm(ttt.flatten())
-                g1, count = self.fine_grained_binary_search_local(model, x0, y0, ttt, initial_lbd = g2, tol=beta/500)
+                g1_1, count = self.fine_grained_binary_search_local(model, x0, y0, ttt, initial_lbd = g2, tol=beta/500)
                 opt_count += count
-                gradient += (g1-g2)/beta * u
+                gradient_1 += (g1_1-g2)/beta * u
 
-                if g1 < min_g1:
-                    min_g1 = g1
+                if g1_1 < min_g1:
+                    min_g1 = g1_1
                     min_ttt = ttt
-            gradient = 1.0/q * gradient
+
+            gradient_2 = np.zeros(theta.shape)
+            q = 5
+            #min_g1 = float('inf')
+            for _ in range(q):
+                u = np.random.randn(*theta.shape)
+                u /= self.norm(u.flatten())
+                ttt = theta+beta * u
+                ttt /= self.norm(ttt.flatten())
+                g1_2, count = self.fine_grained_binary_search_local(model, 1.0-x0, y0, ttt, initial_lbd = g2, tol=beta/500)
+                opt_count += count
+                gradient_2 += (g1_2-g2)/beta * u
+
+                if g1_2 < min_g1:
+                    min_g1 = g1_2
+                    min_ttt = ttt
+
+            gradient_3 = np.zeros(theta.shape)
+            q = 5
+            #min_g1 = float('inf')
+            for _ in range(q):
+                u = np.random.randn(*theta.shape)
+                u /= self.norm(u.flatten())
+                ttt = theta+beta * u
+                ttt /= self.norm(ttt.flatten())
+                g1_3, count = self.fine_grained_binary_search_local(model, flipped_x0, y0, ttt, initial_lbd = g2, tol=beta/500)
+                opt_count += count
+                gradient_3 += (g1_3-g2)/beta * u
+
+                if g1_3 < min_g1:
+                    min_g1 = g1_3
+                    min_ttt = ttt
+
+            gradient_4 = np.zeros(theta.shape)
+            q = 5
+            #min_g1 = float('inf')
+            for _ in range(q):
+                u = np.random.randn(*theta.shape)
+                u /= self.norm(u.flatten())
+                ttt = theta+beta * u
+                ttt /= self.norm(ttt.flatten())
+                g1_4, count = self.fine_grained_binary_search_local(model, 1.0-flipped_x0, y0, ttt, initial_lbd = g2, tol=beta/500)
+                opt_count += count
+                gradient_4 += (g1_4-g2)/beta * u
+
+                if g1_4 < min_g1:
+                    min_g1 = g1_4
+                    min_ttt = ttt
+
+            gradient = 1.0/q * gradient_1 + 1.0/q * gradient_2 + 1.0/q * gradient_3 + 1.0/q * gradient_4
 
             if (i+1)%1 == 0:
-                print("Iteration %3d: g(theta + beta*u) = %.4f g(theta) = %.4f distortion %.4f num_queries %d" % (i+1, g1, g2, self.norm((g2*theta).flatten()), opt_count))
+                print("Iteration %3d: g(theta + beta*u) = %.4f g(theta) = %.4f distortion %.4f num_queries %d" % (i+1, g1_1, g2, self.norm((g2*theta).flatten()), opt_count))
                 if g2 > prev_obj-stopping:
                     print("stopping")
                     break
@@ -156,21 +220,68 @@ class OPT_attack_lf(object):
                 if (beta < 0.00005):
                     break
 
-        target = model.predict_label(x0 + g_theta*best_theta)
+        target = self.symm_predict(x0 + g_theta*best_theta)
         timeend = time.time()
         time2 = timeend - timestart
         print("\nAdversarial Example Found Successfully: distortion %.4f target %d queries %d \nTime: %.4f seconds" % (g_theta, target, query_count + opt_count, timeend-timestart))
         return (True, x0 + g_theta*best_theta)
 
+
+
+    def symm_predict(self, x0):
+    
+        #print('mmm', x0.shape[0])
+        
+        if x0.shape[0] == 784:
+            x0 = x0.reshape((1,784))
+    
+        #print('mmm', self.model.predict_label(x0))
+        #print('mmm', preds.shape, x0.shape)
+        
+        flipped_x0 = np.reshape(x0, (x0.shape[0], 1, 28, 28))
+        flipped_x0 = torch.from_numpy(flipped_x0)
+        flipped_x0 = hflip(flipped_x0)
+        flipped_x0 = flipped_x0.cpu().detach().numpy()
+        flipped_x0 = np.reshape(flipped_x0, (x0.shape[0],28*28))
+        
+        preds             = self.model.predict_label(x0)
+        preds_flipped     = self.model.predict_label(flipped_x0)
+        preds_inv         = self.model.predict_label(1.0-x0)
+        preds_inv_flipped = self.model.predict_label(1.0-flipped_x0)
+        
+        symm_preds = []
+        for ii in range(x0.shape[0]):
+            if (preds[ii] == preds_flipped[ii]) or (preds[ii] == preds_inv[ii]) or (preds[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds[ii])
+            elif (preds_flipped[ii] == preds_inv[ii]) or (preds_flipped[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_flipped[ii])
+            elif (preds_inv[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_inv[ii])
+            else:
+                rand_no = np.random.randint(0, 4)
+                if rand_no == 0:
+                    symm_preds.append(preds[ii])
+                elif rand_no == 1:
+                    symm_preds.append(preds_flipped[ii])
+                elif rand_no == 2:
+                    symm_preds.append(preds_inv[ii])
+                elif rand_no == 3:
+                    symm_preds.append(preds_inv_flipped[ii])
+
+        symm_preds = np.asarray(symm_preds)
+        return symm_preds
+
+
+
     def fine_grained_binary_search_local(self, model, x0, y0, theta, initial_lbd = 1.0, tol=1e-5):
         nquery = 0
         lbd = initial_lbd
 
-        if model.predict_label(x0+lbd*theta) == y0:
+        if self.symm_predict(x0+lbd*theta) == y0:
             lbd_lo = lbd
             lbd_hi = lbd*1.01
             nquery += 1
-            while model.predict_label(x0+lbd_hi*theta) == y0:
+            while self.symm_predict(x0+lbd_hi*theta) == y0:
                 lbd_hi = lbd_hi*1.01
                 nquery += 1
                 if lbd_hi > 20:
@@ -179,14 +290,14 @@ class OPT_attack_lf(object):
             lbd_hi = lbd
             lbd_lo = lbd*0.99
             nquery += 1
-            while model.predict_label(x0+lbd_lo*theta) != y0 :
+            while self.symm_predict(x0+lbd_lo*theta) != y0 :
                 lbd_lo = lbd_lo*0.99
                 nquery += 1
 
         while (lbd_hi - lbd_lo) > tol:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + lbd_mid*theta) != y0:
+            if self.symm_predict(x0 + lbd_mid*theta) != y0:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -195,7 +306,7 @@ class OPT_attack_lf(object):
     def fine_grained_binary_search(self, model, x0, y0, theta, initial_lbd, current_best):
         nquery = 0
         if initial_lbd > current_best:
-            if model.predict_label(x0+current_best*theta) == y0:
+            if self.symm_predict(x0+current_best*theta) == y0:
                 nquery += 1
                 return float('inf'), nquery
             lbd = current_best
@@ -208,7 +319,7 @@ class OPT_attack_lf(object):
         while (lbd_hi - lbd_lo) > 1e-5:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + lbd_mid*theta) != y0:
+            if self.symm_predict(x0 + lbd_mid*theta) != y0:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -223,7 +334,7 @@ class OPT_attack_lf(object):
         model = self.model
         #print(y0)
         #y0 = y0[0]
-        if (model.predict_label(x0) != y0):
+        if (self.symm_predict(x0) != y0):
             print("Fail to classify the image. No need to attack.")
             return x0,0,0
 
@@ -354,7 +465,7 @@ class OPT_attack_lf(object):
                     break
         g_theta, _ = self.fine_grained_binary_search_local_targeted_original(model, x0, y0, target, best_theta, initial_lbd = 1.0, tol=beta/500)
         dis = self.norm((g_theta*best_theta).flatten())
-        target = model.predict_label(x0 + g_theta*best_theta)
+        target = self.symm_predict(x0 + g_theta*best_theta)
         timeend = time.time()
         print("\nAdversarial Example Found Successfully: distortion %.4f target %d queries %d \nTime: %.4f seconds" % (dis, target, query_count + opt_count, timeend-timestart))
         return x0 + g_theta*best_theta
@@ -363,11 +474,11 @@ class OPT_attack_lf(object):
         nquery = 0
         lbd = initial_lbd
 
-        if model.predict_label(x0+lbd*theta) != t:
+        if self.symm_predict(x0+lbd*theta) != t:
             lbd_lo = lbd
             lbd_hi = lbd*1.01
             nquery += 1
-            while model.predict_label(x0+lbd_hi*theta) != t:
+            while self.symm_predict(x0+lbd_hi*theta) != t:
                 lbd_hi = lbd_hi*1.01
                 nquery += 1
                 if lbd_hi > 100:
@@ -376,14 +487,14 @@ class OPT_attack_lf(object):
             lbd_hi = lbd
             lbd_lo = lbd*0.99
             nquery += 1
-            while model.predict_label(x0+lbd_lo*theta) == t:
+            while self.symm_predict(x0+lbd_lo*theta) == t:
                 lbd_lo = lbd_lo*0.99
                 nquery += 1
 
         while (lbd_hi - lbd_lo) > tol:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + lbd_mid*theta) == t:
+            if self.symm_predict(x0 + lbd_mid*theta) == t:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -397,11 +508,11 @@ class OPT_attack_lf(object):
         nquery = 0
         lbd = initial_lbd
 
-        if model.predict_label(x0+lbd*theta) != t:
+        if self.symm_predict(x0+lbd*theta) != t:
             lbd_lo = lbd
             lbd_hi = lbd*1.01
             nquery += 1
-            while model.predict_label(x0+lbd_hi*theta) != t:
+            while self.symm_predict(x0+lbd_hi*theta) != t:
                 lbd_hi = lbd_hi*1.01
                 nquery += 1
                 if lbd_hi > 100:
@@ -410,14 +521,14 @@ class OPT_attack_lf(object):
             lbd_hi = lbd
             lbd_lo = lbd*0.99
             nquery += 1
-            while model.predict_label(x0+lbd_lo*theta) == t:
+            while self.symm_predict(x0+lbd_lo*theta) == t:
                 lbd_lo = lbd_lo*0.99
                 nquery += 1
 
         while (lbd_hi - lbd_lo) > tol:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + lbd_mid*theta) == t:
+            if self.symm_predict(x0 + lbd_mid*theta) == t:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -426,7 +537,7 @@ class OPT_attack_lf(object):
     def fine_grained_binary_search_targeted(self, model, x0, y0, t, theta, initial_lbd, current_best):
         nquery = 0
         if initial_lbd > current_best:
-            if model.predict_label(x0+current_best*theta) != t:
+            if self.symm_predict(x0+current_best*theta) != t:
                 nquery += 1
                 return float('inf'), nquery
             lbd = current_best
@@ -439,7 +550,7 @@ class OPT_attack_lf(object):
         while (lbd_hi - lbd_lo) > 1e-5:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + lbd_mid*theta) == t:
+            if self.symm_predict(x0 + lbd_mid*theta) == t:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -448,6 +559,8 @@ class OPT_attack_lf(object):
     def __call__(self, input_xi, label_or_target, initial_xi=None, target=None, TARGETED=False):
         if TARGETED:
             adv = self.attack_targeted(initial_xi, input_xi, label_or_target, target)
+            print('HERE')
+            exit()
         else:
             adv = self.attack_untargeted(input_xi, label_or_target)
         return adv

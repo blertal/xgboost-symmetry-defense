@@ -9,9 +9,13 @@ import scipy.spatial
 from scipy.linalg import qr
 #from qpsolvers import solve_qp
 import random
+import torch
+from torchvision import transforms
 
 start_learning_rate = 1.0
 MAX_ITER = 1000
+
+hflip = transforms.RandomHorizontalFlip(p=1.0)
 
 
 def quad_solver(Q, b):
@@ -55,6 +59,64 @@ class OPT_attack_sign_SGD_cpu(object):
 
     def get_log(self):
         return self.log
+        
+        
+    def symm_predict(self, x0):
+  
+        #print('mmm', x0.shape[0])
+        
+        if x0.shape[0] == 784:
+            x0 = x0.reshape((1,784))
+   
+            #print('mmm', self.model.predict_label(x0))
+            #print('mmm', preds.shape, x0.shape)
+        #print('mmm', x0.shape[0])
+        
+        flipped_x0 = np.reshape(x0, (x0.shape[0], 1, 28, 28))
+        flipped_x0 = torch.from_numpy(flipped_x0)
+        flipped_x0 = hflip(flipped_x0)
+        flipped_x0 = flipped_x0.cpu().detach().numpy()
+        flipped_x0 = np.reshape(flipped_x0, (x0.shape[0],28*28))
+        
+        if x0.shape[0] != 1:
+            x0 = x0.reshape((x0.shape[0],784))
+            flipped_x0 = x0.reshape((x0.shape[0],784))
+        
+        preds             = self.model.predict_label(x0)
+        preds_flipped     = self.model.predict_label(flipped_x0)
+        preds_inv         = self.model.predict_label(1.0-x0)
+        preds_inv_flipped = self.model.predict_label(1.0-flipped_x0)
+        
+        the_range = x0.shape[0]
+        if x0.shape[0] == 784:
+            preds = np.array([preds])
+            preds_flipped = np.array([preds_flipped])
+            preds_inv = np.array([preds_inv])
+            preds_inv_flipped = np.array([preds_inv_flipped])
+            the_range = 1
+        
+        symm_preds = []
+        for ii in range(the_range):
+            if (preds[ii] == preds_flipped[ii]) or (preds[ii] == preds_inv[ii]) or (preds[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds[ii])
+            elif (preds_flipped[ii] == preds_inv[ii]) or (preds_flipped[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_flipped[ii])
+            elif (preds_inv[ii] == preds_inv_flipped[ii]):
+                symm_preds.append(preds_inv[ii])
+            else:
+                rand_no = np.random.randint(0, 4)
+                if rand_no == 0:
+                    symm_preds.append(preds[ii])
+                elif rand_no == 1:
+                    symm_preds.append(preds_flipped[ii])
+                elif rand_no == 2:
+                    symm_preds.append(preds_inv[ii])
+                elif rand_no == 3:
+                    symm_preds.append(preds_inv_flipped[ii])
+
+        symm_preds = np.asarray(symm_preds)
+        return symm_preds
+        
 
     def attack_untargeted(self, x0, y0, alpha = 0.2, beta = 0.001, iterations = 1000, query_limit=20000,
                           distortion=None, seed=None, svm=False, momentum=0.0, stopping=0.0001):
@@ -69,7 +131,7 @@ class OPT_attack_sign_SGD_cpu(object):
         query_count = 0
         ls_total = 0
 
-        if (model.predict_label(x0) != y0):
+        if (self.symm_predict(x0) != y0):
             print("Fail to classify the image. No need to attack.")
             return (False, x0)
 
@@ -84,7 +146,7 @@ class OPT_attack_sign_SGD_cpu(object):
         for i in range(num_directions):
             query_count += 1
             theta = np.random.randn(*x0.shape)
-            if model.predict_label(x0+np.array(theta, dtype=float))!=y0:
+            if self.symm_predict(x0+np.array(theta, dtype=float))!=y0:
                 initial_lbd = self.norm(theta)
                 theta /= initial_lbd
                 lbd, count = self.fine_grained_binary_search(model, x0, y0, theta, initial_lbd, g_theta)
@@ -99,7 +161,7 @@ class OPT_attack_sign_SGD_cpu(object):
                 query_count += 1
                 theta = np.random.uniform(-1, 1, *x0.shape)
                 # theta = np.random.randn(*x0.shape)
-                if model.predict_label(x0+np.array(theta, dtype=float))!=y0:
+                if self.symm_predict(x0+np.array(theta, dtype=float))!=y0:
                     initial_lbd = self.norm(theta)
                     theta /= initial_lbd
                     lbd, count = self.fine_grained_binary_search(model, x0, y0, theta, initial_lbd, g_theta)
@@ -117,6 +179,15 @@ class OPT_attack_sign_SGD_cpu(object):
         print("==========> Found best distortion %.4f in %.4f seconds "
               "using %d queries" % (g_theta, timeend-timestart, query_count))
 
+        if x0.shape[0] == 784:
+            x0 = x0.reshape((1,784))
+            
+        flipped_x0 = np.reshape(x0, (x0.shape[0], 1, 28, 28))
+        flipped_x0 = torch.from_numpy(flipped_x0)
+        flipped_x0 = hflip(flipped_x0)
+        flipped_x0 = flipped_x0.cpu().detach().numpy()
+        flipped_x0 = np.reshape(flipped_x0, (x0.shape[0],28*28))
+
         self.log[0][0], self.log[0][1] = g_theta, query_count
         # Begin Gradient Descent.
         timestart = time.time()
@@ -127,9 +198,21 @@ class OPT_attack_sign_SGD_cpu(object):
         distortions = [gg]
         for i in range(iterations):
             if svm == True:
-                sign_gradient, grad_queries = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta)
+                #sign_gradient, grad_queries = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg1, gq1 = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg2, gq2 = self.sign_grad_svm(1.0-x0, y0, xg, initial_lbd=gg, h=beta)
+                sg3, gq3 = self.sign_grad_svm(flipped_x0, y0, xg, initial_lbd=gg, h=beta)
+                sg4, gq4 = self.sign_grad_svm(1.0-flipped_x0, y0, xg, initial_lbd=gg, h=beta)
+                sign_gradient = sg1 + sg2 + sg3 + sg4
+                grad_queries  = gq1 + gq2 + gq3 + gq4
             else:
-                sign_gradient, grad_queries = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta)
+                #sign_gradient, grad_queries = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg1, gq1 = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg2, gq2 = self.sign_grad_v1(1.0-x0, y0, xg, initial_lbd=gg, h=beta)
+                sg3, gq3 = self.sign_grad_v1(flipped_x0, y0, xg, initial_lbd=gg, h=beta)
+                sg4, gq4 = self.sign_grad_v1(1.0-flipped_x0, y0, xg, initial_lbd=gg, h=beta)
+                sign_gradient = sg1 + sg2 + sg3 + sg4
+                grad_queries  = gq1 + gq2 + gq3 + gq4
 
             if False:
                 # Compare cosine distance with numerical gradient.
@@ -215,7 +298,7 @@ class OPT_attack_sign_SGD_cpu(object):
 #                 print("Success: stopping threshold reached")
 #                 break
 #             prev_obj = gg
-        target = model.predict_label(x0 + np.array(gg*xg, dtype=float))
+        target = self.symm_predict(x0 + np.array(gg*xg, dtype=float))
         timeend = time.time()
         time2 = timeend-timestart
         print("\nAdversarial Example Found Successfully: distortion %.4f target"
@@ -259,7 +342,7 @@ class OPT_attack_sign_SGD_cpu(object):
 
             xs.append(x0+np.array(initial_lbd*new_theta, dtype=float))
 
-        preds = self.model.predict_label(np.array(xs))
+        preds = self.symm_predict(np.array(xs))
 
         for iii in range(K):
             sign = 1
@@ -270,7 +353,7 @@ class OPT_attack_sign_SGD_cpu(object):
                 sign = -1
 
             # Untargeted case
-            # preds.append(self.model.predict_label(x0+np.array(initial_lbd*new_theta, dtype=float)).item())
+            # preds.append(self.symm_predict(x0+np.array(initial_lbd*new_theta, dtype=float)).item())
             if (target is None and pred != y0):
                 sign = -1
             queries += 1
@@ -302,7 +385,7 @@ class OPT_attack_sign_SGD_cpu(object):
             ss = -1
             new_theta = theta + h*u
             new_theta /= self.norm(new_theta)
-            if self.model.predict_label(x0+np.array(initial_lbd*new_theta, dtype=float)) == y0:
+            if self.symm_predict(x0+np.array(initial_lbd*new_theta, dtype=float)) == y0:
                 ss = 1
             queries += 1
             sign_grad += sign(u)*ss
@@ -329,14 +412,14 @@ class OPT_attack_sign_SGD_cpu(object):
 
             # Targeted case.
             if (target is not None and
-                self.model.predict_label(x0+np.array(initial_lbd*new_theta, dtype=float)) == target):
+                self.symm_predict(x0+np.array(initial_lbd*new_theta, dtype=float)) == target):
                 sign = -1
 
             # Untargeted case
             if (target is None and
-                self.model.predict_label(x0+np.array(initial_lbd*new_theta, dtype=float)) != y0):
+                self.symm_predict(x0+np.array(initial_lbd*new_theta, dtype=float)) != y0):
                 sign = -1
-                #if self.model.predict_label(x0+np.array((initial_lbd*1.00001)*new_theta, dtype=float)) == y0:
+                #if self.symm_predict(x0+np.array((initial_lbd*1.00001)*new_theta, dtype=float)) == y0:
                 #    print "Yes"
                 #else:
                 #    print "No"
@@ -362,11 +445,11 @@ class OPT_attack_sign_SGD_cpu(object):
         nquery = 0
         lbd = initial_lbd
 
-        if model.predict_label(x0+np.array(lbd*theta, dtype=float)) == y0:
+        if self.symm_predict(x0+np.array(lbd*theta, dtype=float)) == y0:
             lbd_lo = lbd
             lbd_hi = lbd*1.01
             nquery += 1
-            while model.predict_label(x0+np.array(lbd_hi*theta, dtype=float)) == y0:
+            while self.symm_predict(x0+np.array(lbd_hi*theta, dtype=float)) == y0:
                 lbd_hi = lbd_hi*1.01
                 nquery += 1
                 if lbd_hi > 20:
@@ -375,14 +458,14 @@ class OPT_attack_sign_SGD_cpu(object):
             lbd_hi = lbd
             lbd_lo = lbd*0.99
             nquery += 1
-            while model.predict_label(x0+np.array(lbd_lo*theta, dtype=float)) != y0 :
+            while self.symm_predict(x0+np.array(lbd_lo*theta, dtype=float)) != y0 :
                 lbd_lo = lbd_lo*0.99
                 nquery += 1
 
         while (lbd_hi - lbd_lo) > tol:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + np.array(lbd_mid*theta, dtype=float)) != y0:
+            if self.symm_predict(x0 + np.array(lbd_mid*theta, dtype=float)) != y0:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -391,7 +474,7 @@ class OPT_attack_sign_SGD_cpu(object):
     def fine_grained_binary_search(self, model, x0, y0, theta, initial_lbd, current_best):
         nquery = 0
         if initial_lbd > current_best:
-            if model.predict_label(x0+np.array(current_best*theta, dtype=float)) == y0:
+            if self.symm_predict(x0+np.array(current_best*theta, dtype=float)) == y0:
                 nquery += 1
                 return float('inf'), nquery
             lbd = current_best
@@ -404,7 +487,7 @@ class OPT_attack_sign_SGD_cpu(object):
         while (lbd_hi - lbd_lo) > 1e-5:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + np.array(lbd_mid*theta, dtype=float)) != y0:
+            if self.symm_predict(x0 + np.array(lbd_mid*theta, dtype=float)) != y0:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -427,7 +510,7 @@ class OPT_attack_sign_SGD_cpu(object):
             x[ix] = oldval + h # increment by h
             unit_x = x / self.norm(x)
             if sign:
-                if model.predict_label(x0+np.array(initial_lbd*unit_x, dtype=float)) == y0:
+                if self.symm_predict(x0+np.array(initial_lbd*unit_x, dtype=float)) == y0:
                     g = 1
                 else:
                     g = -1
@@ -459,7 +542,7 @@ class OPT_attack_sign_SGD_cpu(object):
         y0 = y0[0]
         print("Targeted attack - Source: {0} and Target: {1}".format(y0, target.item()))
 
-        if (model.predict_label(x0) == target):
+        if (self.symm_predict(x0) == target):
             print("Image already target. No need to attack.")
             return x0, 0.0
 
@@ -478,13 +561,9 @@ class OPT_attack_sign_SGD_cpu(object):
         print("Searching for the initial direction on %d samples: " % (num_samples))
         timestart = time.time()
 
-#         samples = set(random.sample(range(len(self.train_dataset)), num_samples))
-#         print(samples)
-#         train_dataset = self.train_dataset[samples]
-
         # Iterate through training dataset. Find best initial point for gradient descent.
         for i, (xi, yi) in enumerate(self.train_dataset):
-            yi_pred = model.predict_label(xi)
+            yi_pred = self.symm_predict(xi)
             query_count += 1
             if yi_pred != target:
                 continue
@@ -505,18 +584,6 @@ class OPT_attack_sign_SGD_cpu(object):
             if i > 500:
                 break
 
-
-#         xi = initial_xi
-#         xi = xi.numpy()
-#         theta = xi - x0
-#         initial_lbd = self.norm(theta.flatten(),np.inf)
-#         theta /= initial_lbd     # might have problem on the defination of direction
-#         lbd, count, lbd_g2 = self.fine_grained_binary_search_local_targeted(model, x0, y0, target, theta)
-#         query_count += count
-#         if lbd < g_theta:
-#             best_theta, g_theta = theta, lbd
-#             print("--------> Found distortion %.4f" % g_theta)
-
         timeend = time.time()
         if g_theta == np.inf:
             return x0, float('inf')
@@ -531,9 +598,21 @@ class OPT_attack_sign_SGD_cpu(object):
         distortions = [gg]
         for i in range(iterations):
             if svm == True:
-                sign_gradient, grad_queries = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                #sign_gradient, grad_queries = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg1, gq1 = self.sign_grad_svm(x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg2, gq2 = self.sign_grad_svm(1.0-x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg3, gq3 = self.sign_grad_svm(flipped_x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg4, gq4 = self.sign_grad_svm(1.0-flipped_x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sign_gradient = sg1 + sg2 + sg3 + sg4
+                grad_queries  = gq1 + gq2 + gq3 + gq4
             else:
-                sign_gradient, grad_queries = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                #sign_gradient, grad_queries = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta)
+                sg1, gq1 = self.sign_grad_v1(x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg2, gq2 = self.sign_grad_v1(1.0-x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg3, gq3 = self.sign_grad_v1(flipped_x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sg4, gq4 = self.sign_grad_v1(1.0-flipped_x0, y0, xg, initial_lbd=gg, h=beta, target=target)
+                sign_gradient = sg1 + sg2 + sg3 + sg4
+                grad_queries  = gq1 + gq2 + gq3 + gq4
 
             if False:
                 # Compare cosine distance with numerical gradient.
@@ -601,7 +680,7 @@ class OPT_attack_sign_SGD_cpu(object):
 #                 break
 #             prev_obj = gg
 
-        adv_target = model.predict_label(x0 + np.array(gg*xg, dtype=float))
+        adv_target = self.symm_predict(x0 + np.array(gg*xg, dtype=float))
         if (adv_target == target):
             timeend = time.time()
             print("\nAdversarial Example Found Successfully: distortion %.4f target"
@@ -616,11 +695,11 @@ class OPT_attack_sign_SGD_cpu(object):
         nquery = 0
         lbd = initial_lbd
 
-        if model.predict_label(x0 + np.array(lbd*theta, dtype=float)) != t:
+        if self.symm_predict(x0 + np.array(lbd*theta, dtype=float)) != t:
             lbd_lo = lbd
             lbd_hi = lbd*1.01
             nquery += 1
-            while model.predict_label(x0 + np.array(lbd_hi*theta, dtype=float)) != t:
+            while self.symm_predict(x0 + np.array(lbd_hi*theta, dtype=float)) != t:
                 lbd_hi = lbd_hi*1.01
                 nquery += 1
                 if lbd_hi > 100:
@@ -629,14 +708,14 @@ class OPT_attack_sign_SGD_cpu(object):
             lbd_hi = lbd
             lbd_lo = lbd*0.99
             nquery += 1
-            while model.predict_label(x0 + np.array(lbd_lo*theta, dtype=float)) == t:
+            while self.symm_predict(x0 + np.array(lbd_lo*theta, dtype=float)) == t:
                 lbd_lo = lbd_lo*0.99
                 nquery += 1
 
         while (lbd_hi - lbd_lo) > tol:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + np.array(lbd_mid*theta, dtype=float)) == t:
+            if self.symm_predict(x0 + np.array(lbd_mid*theta, dtype=float)) == t:
                 lbd_hi = lbd_mid
             else:
                 lbd_lo = lbd_mid
@@ -649,7 +728,7 @@ class OPT_attack_sign_SGD_cpu(object):
     def fine_grained_binary_search_targeted(self, model, x0, y0, t, theta, initial_lbd, current_best):
         nquery = 0
         if initial_lbd > current_best:
-            if model.predict_label(x0 + np.array(current_best*theta, dtype=float)) != t:
+            if self.symm_predict(x0 + np.array(current_best*theta, dtype=float)) != t:
                 nquery += 1
                 return float('inf'), nquery
             lbd = current_best
@@ -662,7 +741,7 @@ class OPT_attack_sign_SGD_cpu(object):
         while (lbd_hi - lbd_lo) > 1e-5:
             lbd_mid = (lbd_lo + lbd_hi)/2.0
             nquery += 1
-            if model.predict_label(x0 + np.array(lbd_mid*theta, dtype=float)) != t:
+            if self.symm_predict(x0 + np.array(lbd_mid*theta, dtype=float)) != t:
                 lbd_lo = lbd_mid
             else:
                 lbd_hi = lbd_mid

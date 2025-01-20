@@ -86,13 +86,6 @@ elif dataset == "HIGGS":#-------d---------
 	num_round = 300
 
 
-
-
-
-# Load dataset
-#X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", training[dataset]))
-
-
 #X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
 X_test, y_test         = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
 X_test_inv, y_test_inv = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", 'inverted_'+testing[dataset]))
@@ -102,14 +95,6 @@ dtest     = xgb.DMatrix(X_test, y_test)
 dtest_inv = xgb.DMatrix(X_test_inv, y_test_inv)
 dtest_flipped     = xgb.DMatrix(X_test_flipped, y_test_flipped)
 dtest_inv_flipped = xgb.DMatrix(X_test_inv_flipped, y_test_inv_flipped)
-#print(X_test.shape, y_test.shape)
-#print(X_test[0])
-#exit()
-
-
-
-#model = xgb.XGBClassifier()
-#model.load_model("../inverted/models/binary_mnist_orig.model")
 
 
 model_orig = xgb.Booster({'nthread': 20})
@@ -155,9 +140,6 @@ else:
 
 # SUBSET prediction ======================================================================
 if dataset == 'fashion':
-  #X_test, y_test = load_svmlight_file('inverted/data/flipped_fashion.test0')#os.path.join(DEMO_DIR, "", "inverted/data", 'flipped_'+testing[dataset]))
-  
-  #X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", 'fashion.test0'))#+testing[dataset]))
 
   model_subset = xgb.Booster({'nthread': 20})
   model_subset.load_model('inverted/models/'+dataset+'_subgroup.model')
@@ -184,10 +166,4 @@ if dataset == 'fashion':
       	 
   print(count/labels.shape[0])
       
-      
-      
-      
-      
-      
-      
-      
+

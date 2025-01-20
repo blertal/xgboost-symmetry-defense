@@ -19,6 +19,7 @@ from sklearn.datasets import load_svmlight_file
 # Make sure the demo knows where to load the data.
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 XGBOOST_ROOT_DIR = CURRENT_DIR#os.path.dirname(os.path.dirname(CURRENT_DIR))
+#DEMO_DIR = os.path.join(XGBOOST_ROOT_DIR, "demo")
 DEMO_DIR = XGBOOST_ROOT_DIR
 
 
@@ -47,57 +48,61 @@ testing["HIGGS"]    = "HIGGS_s.test0"
 
 
 both = {}
-both["binary_mnist"]  = "both_binary_mnist0"
-both["mnist"]         = "both_ori_mnist.train0"
-both["fashion"]       = "both_fashion.train0"
+
+#both["breast_cancer"] = "both_breast_cancer.train"
+#both["mnist"]         = "both_ori_mnist.train0"
+
+#both["binary_mnist"]  = "both_binary_mnist0"
+#both["mnist"]         = "both_ori_mnist.train0"
+#both["fashion"]       = "both_fashion.train0"
 both["breast_cancer"] = "both_breast_cancer_scale0.train"
-both["diabetes"]      = "both_diabetes_scale0.train"
-both["webspam"]       = "both_webspam_wc_normalized_unigram.svm0.train"
-both["covtype"]       = "both_covtype.scale01.train0"
-both["ijcnn"]         = "both_ijcnn1s0"
-both["HIGGS"]         = "both_HIGGS_s.train0"
+#both["diabetes"]      = "both_diabetes_scale0.train"
+#both["webspam"]       = "both_webspam_wc_normalized_unigram.svm0.train"
+#both["covtype"]       = "both_covtype.scale01.train0"
+#both["ijcnn"]         = "both_ijcnn1s0"
+#both["HIGGS"]         = "both_HIGGS_s.train0"
 
 
-subgroup = {}
-subgroup["binary_mnist"] = "subgroup_binary_mnist0"
-subgroup["mnist"]        = "subgroup_ori_mnist.train0"
-subgroup["fashion"]      = "subgroup_fashion.train0"
 
-dataset = "fashion"
+dataset = "breast_cancer"
 
-if dataset == "binary_mnist":
-	param = {"objective": "binary:logistic", "eta":0.02, "gamma":0.0, "min_child_weight":1, "max_depth": 4}
+#print(both[dataset])
+#exit()
+
+if dataset == "binary_mnist":#-------------
+	param = {"objective": "binary:logistic", "eta":0.02, "gamma":0.0, "min_child_weight":1, "max_depth": 4, "tree_method": "exact"}
 	num_round = 1000
-elif dataset == "mnist":
-	param = {"objective": "multi:softmax", "eta":0.3, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 10}
+elif dataset == "mnist":#-------------
+	param = {"objective": "multi:softmax", "eta":0.3, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 10, "tree_method": "exact"}
 	num_round = 200
-elif dataset == "fashion":
-	param = {"objective": "multi:softmax", "eta":0.3, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 10}
+elif dataset == "fashion":#-------------
+	param = {"objective": "multi:softmax", "eta":0.3, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 10, "tree_method": "exact"}
 	num_round = 200
-elif dataset == "breast_cancer":
-	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 6}
+elif dataset == "breast_cancer":#-------------
+	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 6, "tree_method": "exact"}
 	num_round = 10
-elif dataset == "diabetes":
-	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 5}
+elif dataset == "diabetes":#-------------
+	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 5, "tree_method": "exact"}
 	num_round = 25
-elif dataset == "webspam":
-	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 8}
+elif dataset == "webspam":#-------------
+	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 8, "tree_method": "exact"}
 	num_round = 100
-elif dataset == "covtype":
-	param = {"objective": "multi:softmax", "eta":0.2, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 7}
+elif dataset == "covtype":#-------------
+	param = {"objective": "multi:softmax", "eta":0.2, "gamma":0.0, "min_child_weight":1, "max_depth": 8, "num_class": 7, "tree_method": "exact"}
 	num_round = 200
-elif dataset == "ijcnn":
-	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 8}
+elif dataset == "ijcnn":#-------------
+	param = {"objective": "binary:logistic", "eta":0.3, "gamma":1.0, "min_child_weight":1, "max_depth": 8, "tree_method": "exact"}
 	num_round = 100
 elif dataset == "HIGGS":
-	param = {"objective": "binary:logistic", "eta":0.2, "gamma":1.0, "min_child_weight":1, "max_depth": 8}
+	param = {"objective": "binary:logistic", "eta":0.2, "gamma":1.0, "min_child_weight":1, "max_depth": 8, "tree_method": "exact"}
 	num_round = 300
 
-ORIG = False
+
+
+ORIG = True
 INV  = False
 BOTH = False
-SUBGROUP = False
-ORIG_FLIPPED = True
+
 
 # Orig dataset
 if ORIG:
@@ -105,7 +110,6 @@ if ORIG:
   X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
   dtrain = xgb.DMatrix(X, y)
   dtest = xgb.DMatrix(X_test, y_test)
-
 
 # Inverted dataset
 if INV:
@@ -119,22 +123,6 @@ if INV:
 if BOTH:
   X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", both[dataset]))
   X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
-  dtrain = xgb.DMatrix(X, y)
-  dtest = xgb.DMatrix(X_test, y_test)
-
-
-if SUBGROUP:
-  X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", 'subgroup_' + training[dataset]))
-  X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", testing[dataset]))
-  dtrain = xgb.DMatrix(X, y)
-  dtest = xgb.DMatrix(X_test, y_test)
-
-  #print(X.shape, y.shape)
-  #exit()
-
-if ORIG_FLIPPED:
-  X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", 'orig_flipped_' + training[dataset]))
-  X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", testing[dataset]))
   dtrain = xgb.DMatrix(X, y)
   dtest = xgb.DMatrix(X_test, y_test)
 
@@ -188,58 +176,17 @@ if BOTH:
       labels = labels.astype(int)
       print(np.sum(preds == labels), '/', preds.shape[0])
 
-
-# Train
-if SUBGROUP:
-  watchlist     = [(dtest, "eval"), (dtrain, "train")]
-  bst = xgb.train(param, dtrain, num_boost_round=num_round, evals=watchlist)
-  # run prediction
-  preds = bst.predict(dtest,num_round)
-  labels = dtest.get_label()
-  if param["objective"] == "binary:logistic":
-      print("error=%f" % (
-        sum(1 for i in range(len(preds)) if int(preds[i] > 0.5) != labels[i])
-        / float(len(preds))))
-  else:
-      preds = np.argmax(preds, axis=1)
-      labels = labels.astype(int)
-      print(np.sum(preds == labels), '/', preds.shape[0])
-
-
-# Fashion orig and flipped training samples
-if ORIG_FLIPPED:
-  watchlist     = [(dtest, "eval"), (dtrain, "train")]
-  bst = xgb.train(param, dtrain, num_boost_round=num_round, evals=watchlist)
-  # run prediction
-  preds = bst.predict(dtest,num_round)
-  labels = dtest.get_label()
-  if param["objective"] == "binary:logistic":
-      print("error=%f" % (
-        sum(1 for i in range(len(preds)) if int(preds[i] > 0.5) != labels[i])
-        / float(len(preds))))
-  else:
-      preds = np.argmax(preds, axis=1)
-      labels = labels.astype(int)
-      print(np.sum(preds == labels), '/', preds.shape[0])
-
 if ORIG:
-    bst.dump_model('inverted/models/' + dataset + '_30000.json', dump_format='json')
-    bst.save_model('inverted/models/' + dataset + '_30000.model')
+    bst.dump_model('inverted/models/exact_' + dataset + '_orig.json', dump_format='json')
+    bst.save_model('inverted/models/exact_' + dataset + '_orig.model')
+    
 
 if INV:
-    bst_inv.dump_model('inverted/models/' + dataset + '_inv.json', dump_format='json')
-    bst_inv.save_model('inverted/models/' + dataset + '_inv.model')
+    bst_inv.dump_model('inverted/models/exact_' + dataset + '_inv.json', dump_format='json')
+    bst_inv.save_model('inverted/models/exact_' + dataset + '_inv.model')
+
 
 if BOTH:
-    bst.dump_model('inverted/models/' + dataset + '_both.json', dump_format='json')
-    bst.save_model('inverted/models/' + dataset + '_both.model')
-
-if SUBGROUP:
-    bst.dump_model('inverted/models/' + dataset + '_subgroup.json', dump_format='json')
-    bst.save_model('inverted/models/' + dataset + '_subgroup.model')
-
-if ORIG_FLIPPED:
-    bst.dump_model('inverted/models/' + dataset + '_orig_flipped.json', dump_format='json')
-    bst.save_model('inverted/models/' + dataset + '_orig_flipped.model')
-
+    bst.dump_model('inverted/models/exact_' + dataset + '_both.json', dump_format='json')
+    bst.save_model('inverted/models/exact_' + dataset + '_both.model')
 

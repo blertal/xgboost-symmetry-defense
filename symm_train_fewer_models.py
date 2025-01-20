@@ -63,7 +63,12 @@ subgroup["binary_mnist"] = "subgroup_binary_mnist0"
 subgroup["mnist"]        = "subgroup_ori_mnist.train0"
 subgroup["fashion"]      = "subgroup_fashion.train0"
 
-dataset = "fashion"
+
+
+dataset = "covtype"
+
+#print(both[dataset])
+#exit()
 
 if dataset == "binary_mnist":
 	param = {"objective": "binary:logistic", "eta":0.02, "gamma":0.0, "min_child_weight":1, "max_depth": 4}
@@ -93,19 +98,28 @@ elif dataset == "HIGGS":
 	param = {"objective": "binary:logistic", "eta":0.2, "gamma":1.0, "min_child_weight":1, "max_depth": 8}
 	num_round = 300
 
-ORIG = False
+
+
+ORIG = True
 INV  = False
 BOTH = False
 SUBGROUP = False
-ORIG_FLIPPED = True
+ORIG_FLIPPED = False
 
 # Orig dataset
 if ORIG:
   X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", training[dataset]))
   X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
+  
+  #print(X.shape, y.shape)
+  choices = np.random.choice(400000, 300000, replace=False)
+  #print(choices.shape)
+  #print(choices[0])
+  X = X[choices, :]
+  y = y[choices]
+  
   dtrain = xgb.DMatrix(X, y)
   dtest = xgb.DMatrix(X_test, y_test)
-
 
 # Inverted dataset
 if INV:
@@ -189,6 +203,7 @@ if BOTH:
       print(np.sum(preds == labels), '/', preds.shape[0])
 
 
+
 # Train
 if SUBGROUP:
   watchlist     = [(dtest, "eval"), (dtrain, "train")]
@@ -222,24 +237,30 @@ if ORIG_FLIPPED:
       labels = labels.astype(int)
       print(np.sum(preds == labels), '/', preds.shape[0])
 
+
 if ORIG:
-    bst.dump_model('inverted/models/' + dataset + '_30000.json', dump_format='json')
-    bst.save_model('inverted/models/' + dataset + '_30000.model')
+    bst.dump_model('inverted/models/' + dataset + '_fewer.json', dump_format='json')
+    bst.save_model('inverted/models/' + dataset + '_fewer.model')
+    
 
 if INV:
     bst_inv.dump_model('inverted/models/' + dataset + '_inv.json', dump_format='json')
     bst_inv.save_model('inverted/models/' + dataset + '_inv.model')
 
+
 if BOTH:
     bst.dump_model('inverted/models/' + dataset + '_both.json', dump_format='json')
     bst.save_model('inverted/models/' + dataset + '_both.model')
+    
 
 if SUBGROUP:
     bst.dump_model('inverted/models/' + dataset + '_subgroup.json', dump_format='json')
     bst.save_model('inverted/models/' + dataset + '_subgroup.model')
+    
 
 if ORIG_FLIPPED:
     bst.dump_model('inverted/models/' + dataset + '_orig_flipped.json', dump_format='json')
     bst.save_model('inverted/models/' + dataset + '_orig_flipped.model')
+
 
 

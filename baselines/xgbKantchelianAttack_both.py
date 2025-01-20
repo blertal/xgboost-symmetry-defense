@@ -1,7 +1,3 @@
-############################################################
-### Forked from https://github.com/YihanWang617/On-ell_p-Robustness-of-Ensemble-Stumps-and-Trees
-############################################################
-
 import pprint
 from gurobipy import *
 from sklearn.datasets import load_svmlight_file
@@ -14,18 +10,9 @@ import os
 import xgboost as xgb
 import time
 import argparse
-import torch
-from torchvision import transforms
 
 GUARD_VAL = 2e-7
 ROUND_DIGITS = 20
-
-
-
-def sigmoid(x):
-  return 1 / (1 + math.exp(-x))
-
-
 
 class xgboost_wrapper():
   def __init__(self, model, binary=False):
@@ -81,8 +68,7 @@ class node_wrapper(object):
     self.add_leaves(treeid, nodeid, left_leaves,right_leaves,root)
 
   def print(self):
-    ################print('node_pos{}, attr:{}, th:{}, leaves:{}'.format(self.node_pos, self.attribute, self.threshold, self.leaves_lists))i
-    pass##################
+    print('node_pos{}, attr:{}, th:{}, leaves:{}'.format(self.node_pos, self.attribute, self.threshold, self.leaves_lists))
 
   def add_leaves(self, treeid,  nodeid, left_leaves, right_leaves, root=False):
     self.node_pos.append({'treeid':treeid, 'nodeid':nodeid})
@@ -107,7 +93,7 @@ class node_wrapper(object):
 
 class xgbKantchelianAttack(object):
 
-  def __init__(self, model, num_threads, json_path, order=np.inf, guard_val=GUARD_VAL, round_digits=ROUND_DIGITS, LP=False, binary=True, pos_json_input=None, neg_json_input=None):
+  def __init__(self, model, num_threads, json_path, inv_json_path, order=np.inf, guard_val=GUARD_VAL, round_digits=ROUND_DIGITS, LP=False, binary=True, pos_json_input=None, neg_json_input=None):
     self.LP = LP
     self.binary = binary or (pos_json_input == None) or (neg_json_input == None)
     self.num_threads = num_threads
@@ -132,6 +118,13 @@ class xgbKantchelianAttack(object):
       if type(self.json_file) is not list:
         raise ValueError('model input should be a list of dict loaded by json')
       print('number of trees:',len(self.json_file))
+      
+      print('Loading JSON file:', inv_json_path)
+      with open(inv_json_path) as f:
+        self.inv_json_file = json.load(f)
+      if type(self.inv_json_file) is not list:
+        raise ValueError('model input should be a list of dict loaded by json')
+      print('number of trees:',len(self.json_file))
     else:
       self.pos_json_file = pos_json_input
       self.neg_json_file = neg_json_input
@@ -147,7 +140,7 @@ class xgbKantchelianAttack(object):
     self.leaf_count = [0] # total number of leaves in the first i trees
     node_check = {} # track identical decision nodes. {(attr, th):<index in node_list>}
 
-    def dfs(tree, treeid, root=False, neg=False):
+    def dfs(tree, treeid, root=False, neg=False, inverted=False):
       if 'leaf' in tree.keys():
         if neg:
           self.leaf_v_list.append(-tree['leaf'])
@@ -159,7 +152,10 @@ class xgbKantchelianAttack(object):
         attribute, threshold, nodeid = tree['split'], tree['split_condition'], tree['nodeid']
         if type(attribute) == str:
           attribute = int(attribute[1:])
-        threshold = round(threshold, self.round_digits)
+        if inverted:
+          threshold = 0.0000000000000001 + 1-round(threshold, self.round_digits)
+        else:
+          threshold = round(threshold, self.round_digits)
         # XGBoost can only offer precision up to 8 digits, however, minimum difference between two splits can be smaller than 1e-8
         # here rounding may be an option, but its hard to choose guard value after rounding
         # for example, if round to 1e-6, then guard value should be 5e-7, or otherwise may cause mistake
@@ -169,14 +165,20 @@ class xgbKantchelianAttack(object):
         right_subtree = None
         for subtree in tree['children']:
           if subtree['nodeid'] == tree['yes']:
-            left_subtree = subtree
+            if inverted:
+              right_subtree = subtree
+            else:
+              left_subtree = subtree
           if subtree['nodeid'] == tree['no']:
-            right_subtree = subtree
+            if inverted:
+              left_subtree = subtree
+            else:
+              right_subtree = subtree
         if left_subtree == None or right_subtree == None:
           pprint.pprint(tree)
           raise ValueError('should be a tree but one child is missing')
-        left_leaves = dfs(left_subtree, treeid, False, neg)
-        right_leaves = dfs(right_subtree, treeid, False, neg)
+        left_leaves = dfs(left_subtree, treeid, False, neg, inverted)
+        right_leaves = dfs(right_subtree, treeid, False, neg, inverted)
         if (attribute, threshold) not in node_check:
           self.node_list.append(node_wrapper(treeid, nodeid, attribute, threshold, left_leaves, right_leaves, root))
           node_check[(attribute,threshold)] = len(self.node_list)-1
@@ -187,17 +189,29 @@ class xgbKantchelianAttack(object):
 
     if self.binary:
       for i,tree in enumerate(self.json_file):
-        dfs(tree,i, root=True)
+        dfs(tree,i, root=True, inverted=False)
         self.leaf_count.append(len(self.leaf_v_list))
       if len(self.json_file)+1 != len(self.leaf_count):
         print('self.leaf_count:',self.leaf_count)
         raise ValueError('leaf count error')
+        
+      #print(self.json_file)
+      #exit()
+      
+      for i,tree in enumerate(self.inv_json_file):
+        dfs(tree,i, root=True, inverted=True)
+        self.leaf_count.append(len(self.leaf_v_list))
+      print(len(self.json_file), len(self.inv_json_file), len(self.leaf_count))
+      if len(self.json_file)+len(self.inv_json_file)+1 != len(self.leaf_count):
+        print('self.leaf_count:',self.leaf_count)
+        raise ValueError('leaf count error')
+        
     else:
       for i,tree in enumerate(self.pos_json_file):
-        dfs(tree, i, root=True)
+        dfs(tree, i, root=True, inverted=True)
         self.leaf_count.append(len(self.leaf_v_list))
       for i,tree in enumerate(self.neg_json_file):
-        dfs(tree, i+len(self.pos_json_file), root=True, neg=True)
+        dfs(tree, i+len(self.pos_json_file), root=True, neg=True, inverted=True)
         self.leaf_count.append(len(self.leaf_v_list))
       if len(self.pos_json_file)+len(self.neg_json_file)+1 != len(self.leaf_count):
         print('self.leaf_count:',self.leaf_count)
@@ -219,8 +233,8 @@ class xgbKantchelianAttack(object):
     self.llist = [self.L[key] for key in range(len(self.L))]
     self.plist = [self.P[key] for key in range(len(self.P))]
 
-    #############print('leaf value list:',self.leaf_v_list)
-    #############print('number of leaves in the first k trees:',self.leaf_count)
+    print('leaf value list:',self.leaf_v_list)
+    print('number of leaves in the first k trees:',self.leaf_count)
 
     # p dictionary by attributes, {attr1:[(threshold1, gurobiVar1),(threshold2, gurobiVar2),...],attr2:[...]}
     self.pdict = {}
@@ -240,7 +254,7 @@ class xgbKantchelianAttack(object):
         for i in range(len(self.pdict[key])-1):
           self.m.addConstr(self.pdict[key][i][1]<=self.pdict[key][i+1][1], name='p_consis_attr{}_{}th'.format(key,i))
           min_diff = min( min_diff, self.pdict[key][i+1][0]-self.pdict[key][i][0])
-        ############print('attr {} min difference between thresholds:{}'.format(key,min_diff))
+        print('attr {} min difference between thresholds:{}'.format(key,min_diff))
         if min_diff < 2 * self.guard_val:
           self.guard_val = min_diff/3
           print('guard value too large, change to min_diff/3:',self.guard_val)
@@ -277,6 +291,7 @@ class xgbKantchelianAttack(object):
     if pred != label:
       print('wrong prediction, no need to attack')
       return X
+    #print('X:',x)#########
     print('label:',label)
     print('prediction:',pred)
     # model mislabel
@@ -354,14 +369,14 @@ class xgbKantchelianAttack(object):
           x[key] = node[0] + self.guard_val
 
     print('\n-------------------------------------\n')
-    ###################print('result for this point:',x)
+    print('result for this point:',x)
     adv_pred = self.model.predict(x)
     if adv_pred != label:
       suc = True
     else:
       suc = False
-    #################print('success from solver:', suc)
-    ##################print('mislabel constraint:', np.sum(np.array(self.leaf_v_list)*np.array([item.x for item in self.llist])))
+    print('success from solver:', suc)
+    print('mislabel constraint:', np.sum(np.array(self.leaf_v_list)*np.array([item.x for item in self.llist])))
     if (not suc):
       if self.binary:
         manual_res = self.check(x, self.json_file)
@@ -406,15 +421,16 @@ class xgbKantchelianAttack(object):
             raise ValueError('child not found')
       leaf_values.append(tree['leaf'])
     manual_res = np.sum(leaf_values)
-    ###############print('leaf values:{}, \nsum:{}'.format(leaf_values, manual_res))
+    print('leaf values:{}, \nsum:{}'.format(leaf_values, manual_res))
     return manual_res
 
 
 
 class xgbMultiClassKantchelianAttack(object):
-  def __init__(self, model, num_threads, json_path, num_classes, order=np.inf, guard_val=GUARD_VAL, round_digits=ROUND_DIGITS, LP=False):
+  def __init__(self, model, num_threads, json_path, inv_json_path, num_classes, order=np.inf, guard_val=GUARD_VAL, round_digits=ROUND_DIGITS, LP=False):
     self.model = model
     self.json_path = json_path
+    self.inv_json_path = inv_json_path
     self.num_classes = num_classes
     self.num_threads = num_threads
     if num_classes <= 2:
@@ -424,7 +440,7 @@ class xgbMultiClassKantchelianAttack(object):
     self.round_digits = round_digits
     self.LP = LP
     print('Loading JSON file: ', json_path)
-    with open(json_path) as f:
+    with open(json_path) as f:**
       self.json_file = json.load(f)
     if type(self.json_file) is not list:
       raise ValueError('model input should be a list of dict loaded by json')
@@ -444,11 +460,11 @@ class xgbMultiClassKantchelianAttack(object):
         continue
       print('\n************* original label {}, target label {} starts *************'.format(label, l))
       start_time = time.time()
-      attack_model = xgbKantchelianAttack(self.model, self.num_threads, self.json_path, self.order, self.guard_val, self.round_digits, self.LP, binary=False, pos_json_input=self.json_inputs[label[0]], neg_json_input=self.json_inputs[l])
+      attack_model = xgbKantchelianAttack(self.model, self.num_threads, self.json_path, self.inv_json_path, self.order, self.guard_val, self.round_digits, self.LP, binary=False, pos_json_input=self.json_inputs[label[0]], neg_json_input=self.json_inputs[l])
       end_time = time.time()
       print('time to build the model: %.4f seconds' % (end_time - start_time))
       adv = attack_model.attack(x, label)
-      ##############print('attack result:', adv)
+      print('attack result:', adv)
       if self.LP:
         if attack_model.m.objVal < min_dist:
           min_dist = attack_model.m.objVal
@@ -480,20 +496,17 @@ def main(args):
   bst.load_model(args['model'])
   inv_bst = xgb.Booster({'nthread': args['num_threads']})
   inv_bst.load_model(args['inv_model'])
-  both_bst = xgb.Booster({'nthread': args['num_threads']})
-  both_bst.load_model(args['both_model'])
   binary = (args['num_classes'] == 2)
   order = args['order']
   if order == -1:
     order = np.inf
-  model      = xgboost_wrapper(bst, binary=binary)
-  inv_model  = xgboost_wrapper(inv_bst, binary=binary)
-  both_model = xgboost_wrapper(both_bst, binary=binary)
+  model = xgboost_wrapper(bst, binary=binary)
+  inv_model = xgboost_wrapper(inv_bst, binary=binary)
 
   if binary:
-    attack = xgbKantchelianAttack(model, args['num_threads'], args['json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
+    attack = xgbKantchelianAttack(model, args['num_threads'], args['json'], args['inv_json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
   else:
-    attack = xgbMultiClassKantchelianAttack(model, args['num_threads'], args['json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
+    attack = xgbMultiClassKantchelianAttack(model, args['num_threads'], args['json'], args['inv_json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
 
   test_data, test_labels = load_svmlight_file(args['data'], zero_based=True)
   test_data = test_data.toarray()
@@ -510,90 +523,48 @@ def main(args):
   num_attacks = len(samples) # real number of attacks cannot be larger than test data size
   avg_dist = 0
   counter = 0
-  
-  correct1 = 0
-  correct2 = 0
-  adv1 = 0
-  adv2 = 0
-
-
-  hflip = transforms.RandomHorizontalFlip(p=1.0)
-
+  inv_counter = 0
+  global_start = time.time()
   for n,idx in enumerate(samples):
-
-    adv = attack.attack(test_data[idx], test_labels[idx])
-
-    yi = test_labels[idx]
-    xi = test_data[idx]
-    #Find flipped
-    flipped_xi = np.reshape(xi, (1, 1, 28, 28))
-    flipped_xi = torch.from_numpy(flipped_xi)
-    flipped_xi = hflip(flipped_xi)
-    flipped_xi = flipped_xi.cpu().detach().numpy()
-    flipped_xi = np.reshape(flipped_xi, (1, 28*28))
-    # Find inverted flipped
-    inv_flipped_xi = 1 - flipped_xi
-
-
-    # Default accuracy
-    if (model.predict(xi) == yi):
-        correct1 += 1
-
-
-    orig_classified_correctly = False
-    if  ((model.predict(xi) == yi and model.predict(1-xi) == yi)  or  (model.predict(xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(flipped_xi) == yi and model.predict(inv_flipped_xi) == yi) ):
-        correct2 += 1
-        orig_classified_correctly = True
-    #else:
-    #    continue
-
-    xi = adv
-    # Find flipped
-    flipped_xi = np.reshape(xi, (1, 1, 28, 28))
-    flipped_xi = torch.from_numpy(flipped_xi)
-    flipped_xi = hflip(flipped_xi)
-    flipped_xi = flipped_xi.cpu().detach().numpy()
-    flipped_xi = np.reshape(flipped_xi, (1, 28*28))
-    # Find inverted flipped
-    inv_flipped_xi = 1 - flipped_xi
-
-
-    # Default adversarial accuracy
-    if model.predict(np.reshape(adv, (1, 28*28))) == yi:
-        adv1 += 1
-
-
-    adv_classified_correctly = False
-    if  ((model.predict(xi) == yi and model.predict(1-xi) == yi)  or  (model.predict(xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(flipped_xi) == yi and model.predict(inv_flipped_xi) == yi) ):
-        adv_classified_correctly = True
-        #continue
-    #else:
-        #continue
-
-    if (orig_classified_correctly and adv_classified_correctly):
-        adv2 += 1
-
-    if (orig_classified_correctly and not adv_classified_correctly):
-
+    print("\n\n\n\n======== Point {} ({}/{}) starts =========".format(idx, n+1, num_attacks))
+    predict = model.predict(test_data[idx])
+    if test_labels[idx] == predict:
       counter += 1
-
+    else:
+      print('true label:{}, predicted label:{}'.format(test_labels[idx], predict))
+      print('prediction not correct, skip this one.')
+      continue
+    adv = attack.attack(test_data[idx], test_labels[idx])
     
-      # print(adv)
-      diff = np.abs(adv-test_data[idx])
-      if order == np.inf:
-        dist = np.max(diff)
-      elif order == 0:
-        dist = np.sum(diff > 1e-5)
-      elif order > 0:
-        dist = pow(np.sum(np.power(diff, order)), 1/order)
-      print('adv[0]:', adv[0])
-      if args['feature_start']>0:
-        adv[0] = 0
-        print('0th feature set back to 0. adv[0]:', adv[0])
-      avg_dist += dist
+    inv_predict = inv_model.predict(1-adv)
+    
+    if test_labels[idx] == inv_predict:
+        inv_counter += 1
 
-  print(args['config_path'] + ' final non-adv (' + str(correct1) + ',' + str(correct2) + ')' + ', adv (' + str(adv1) + ',' + str(adv2) + ') - robustness( norm=' + str(avg_dist) + '/' + str(counter) + ', ' + str(n) + ') \n\n')
+    diff = np.abs(adv-test_data[idx])
+    if order == np.inf:
+      dist = np.max(diff)
+    elif order == 0:
+      dist = np.sum(diff > 1e-5)
+    elif order > 0:
+      dist = pow(np.sum(np.power(diff, order)), 1/order)
+    print('adv[0]:', adv[0])
+    if args['feature_start']>0:
+      adv[0] = 0
+      print('0th feature set back to 0. adv[0]:', adv[0])
+    avg_dist += dist
+    print("\n======== Point {} ({}/{}) finished, distortion:{} =========".format(idx, n+1, num_attacks, dist))
+  time_end = time.time()
+  print('\n\nattacked {}/{} points, average linf distortion: {}, total time:{}'.format(counter, num_attacks, avg_dist/counter, time_end-global_start))
 
+  print(args)
+
+  print('*******************************')
+  print('*******************************')
+  print('Results for config:', args['config_path'])
+  print('Num Attacked: %d Actual Examples Tested:%d Inv Counter:%d' % (num_attacks, counter, inv_counter))
+  print('Norm(%d)=%.4f' % (args['order'], avg_dist / counter))
+  print('Time per point: %.4f s' % ((time_end-global_start) / counter))
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
@@ -610,10 +581,8 @@ if __name__ == '__main__':
   args['data'] = config['inputs']
   args['json'] = config['model']
   args['inv_json'] = config['inv_model']
-  args['both_json'] = config['both_model']
   args['model'] = config['model'].replace('.json', '.model')
   args['inv_model'] = config['inv_model'].replace('.json', '.model')
-  args['both_model'] = config['both_model'].replace('.json', '.model')
   args['num_classes'] = config['num_classes']
   args['offset'] = config.get('offset', 0)
   args['num_attacks'] = config['num_point']

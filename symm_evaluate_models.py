@@ -19,7 +19,6 @@ from sklearn.datasets import load_svmlight_file
 # Make sure the demo knows where to load the data.
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 XGBOOST_ROOT_DIR = CURRENT_DIR#os.path.dirname(os.path.dirname(CURRENT_DIR))
-#DEMO_DIR = os.path.join(XGBOOST_ROOT_DIR, "demo")
 DEMO_DIR = XGBOOST_ROOT_DIR
 
 
@@ -95,23 +94,10 @@ elif dataset == "HIGGS":#-------d---------
 
 
 # Load dataset
-#X, y           = load_svmlight_file(os.path.join(DEMO_DIR, "inverted/data", training[dataset]))
-
-
-#X_test, y_test = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
 X_test, y_test         = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", testing[dataset]))
 X_test_inv, y_test_inv = load_svmlight_file(os.path.join(DEMO_DIR, "", "inverted/data", 'inverted_'+testing[dataset]))
 dtest     = xgb.DMatrix(X_test, y_test)
 dtest_inv = xgb.DMatrix(X_test_inv, y_test_inv)
-#print(X_test.shape, y_test.shape)
-#print(X_test[0])
-#exit()
-
-
-
-#model = xgb.XGBClassifier()
-#model.load_model("../inverted/models/binary_mnist_orig.model")
-
 
 model_orig = xgb.Booster({'nthread': 20})
 model_orig.load_model('inverted/models/'+dataset+'_orig.model')
@@ -204,11 +190,4 @@ if dataset == 'fashion':
       	 count = count + 1
   
   print('SUBGROUP', count , 'out of', labels.shape[0], count/labels.shape[0])
-      
-      
-      
-      
-      
-      
-      
-      
+

@@ -1,7 +1,3 @@
-############################################################
-### Forked from https://github.com/YihanWang617/On-ell_p-Robustness-of-Ensemble-Stumps-and-Trees
-############################################################
-
 import pprint
 from gurobipy import *
 from sklearn.datasets import load_svmlight_file
@@ -14,17 +10,13 @@ import os
 import xgboost as xgb
 import time
 import argparse
-
+import torch
+from torchvision import transforms
 
 GUARD_VAL = 2e-7
 ROUND_DIGITS = 20
 
-
-
-def sigmoid(x):
-  return 1 / (1 + math.exp(-x))
-
-
+hflip = transforms.RandomHorizontalFlip(p=1.0)
 
 class xgboost_wrapper():
   def __init__(self, model, binary=False):
@@ -43,18 +35,60 @@ class xgboost_wrapper():
       input_data = np.copy(input_data.reshape(shape[0],np.prod(shape[1:])))
     return input_data, shape
 
+  # Adaptive prediction
   def predict(self, input_data):
     input_data, _ = self.maybe_flat(input_data)
     ori_input = np.copy(input_data)
     np.clip(input_data, 0, 1, input_data)
+
+    #Find flipped
+    flipped_xi = np.reshape(input_data, (1, 1, 28, 28))
+    flipped_xi = torch.from_numpy(flipped_xi)
+    flipped_xi = hflip(flipped_xi)
+    flipped_xi = flipped_xi.cpu().detach().numpy()
+    flipped_xi = np.reshape(flipped_xi, (1, 28*28))
+    # Find inverted flipped
+    inv_flipped_xi = 1 - flipped_xi
+    # Find inv
+    inv_xi = 1 - input_data
+
+    flipped_xi = xgb.DMatrix(sparse.csr_matrix(flipped_xi))
+    inv_flipped_xi = xgb.DMatrix(sparse.csr_matrix(inv_flipped_xi))
+    inv_xi = xgb.DMatrix(sparse.csr_matrix(inv_xi))
+
     input_data = xgb.DMatrix(sparse.csr_matrix(input_data))
     ori_input = xgb.DMatrix(sparse.csr_matrix(ori_input))
+    
     test_predict = np.array(self.model.predict(input_data))
     if self.binary:
       test_predict = (test_predict > 0.5).astype(int)
     else:
       test_predict = test_predict.astype(int)
+
+      pred1 = np.array(self.model.predict(input_data))
+      pred2 = np.array(self.model.predict(flipped_xi))
+      pred3 = np.array(self.model.predict(inv_flipped_xi))
+      pred4 = np.array(self.model.predict(inv_xi))
+
+      if (pred1 == pred2) or (pred1 == pred2) or (pred1 == pred2):
+          return pred1
+      elif (pred2 == pred3) or (pred2 == pred4):
+          return pred2
+      elif (pred3 == pred4):
+          return pred3
+      else:
+          rand_no = np.random.randint(0, 4)
+          if rand_no == 0:
+              return pred1
+          elif rand_no == 1:
+              return pred2
+          elif rand_no == 2:
+              return pred3
+          elif rand_no == 3:
+              return pred4
+
     return test_predict
+
 
   def predict_logits(self, input_data):
     input_data, _ = self.maybe_flat(input_data)
@@ -80,8 +114,7 @@ class node_wrapper(object):
     self.add_leaves(treeid, nodeid, left_leaves,right_leaves,root)
 
   def print(self):
-    ################print('node_pos{}, attr:{}, th:{}, leaves:{}'.format(self.node_pos, self.attribute, self.threshold, self.leaves_lists))i
-    pass##################
+    print('node_pos{}, attr:{}, th:{}, leaves:{}'.format(self.node_pos, self.attribute, self.threshold, self.leaves_lists))
 
   def add_leaves(self, treeid,  nodeid, left_leaves, right_leaves, root=False):
     self.node_pos.append({'treeid':treeid, 'nodeid':nodeid})
@@ -218,8 +251,8 @@ class xgbKantchelianAttack(object):
     self.llist = [self.L[key] for key in range(len(self.L))]
     self.plist = [self.P[key] for key in range(len(self.P))]
 
-    #############print('leaf value list:',self.leaf_v_list)
-    #############print('number of leaves in the first k trees:',self.leaf_count)
+    print('leaf value list:',self.leaf_v_list)
+    print('number of leaves in the first k trees:',self.leaf_count)
 
     # p dictionary by attributes, {attr1:[(threshold1, gurobiVar1),(threshold2, gurobiVar2),...],attr2:[...]}
     self.pdict = {}
@@ -248,9 +281,6 @@ class xgbKantchelianAttack(object):
     for i in range(len(self.leaf_count)-1):
       leaf_vars = [self.llist[j] for j in range(self.leaf_count[i],self.leaf_count[i+1])]
       self.m.addConstr(LinExpr([1]*(self.leaf_count[i+1]-self.leaf_count[i]),leaf_vars)==1, name='leaf_sum_one_for_tree{}'.format(i))
-
-
-
 
     # node leaves constraints
     for j in range(len(self.node_list)):
@@ -353,14 +383,12 @@ class xgbKantchelianAttack(object):
           x[key] = node[0] + self.guard_val
 
     print('\n-------------------------------------\n')
-    ###################print('result for this point:',x)
     adv_pred = self.model.predict(x)
     if adv_pred != label:
       suc = True
     else:
       suc = False
-    #################print('success from solver:', suc)
-    ##################print('mislabel constraint:', np.sum(np.array(self.leaf_v_list)*np.array([item.x for item in self.llist])))
+
     if (not suc):
       if self.binary:
         manual_res = self.check(x, self.json_file)
@@ -405,7 +433,7 @@ class xgbKantchelianAttack(object):
             raise ValueError('child not found')
       leaf_values.append(tree['leaf'])
     manual_res = np.sum(leaf_values)
-    ###############print('leaf values:{}, \nsum:{}'.format(leaf_values, manual_res))
+    print('leaf values:{}, \nsum:{}'.format(leaf_values, manual_res))
     return manual_res
 
 
@@ -447,7 +475,7 @@ class xgbMultiClassKantchelianAttack(object):
       end_time = time.time()
       print('time to build the model: %.4f seconds' % (end_time - start_time))
       adv = attack_model.attack(x, label)
-      ##############print('attack result:', adv)
+      print('attack result:', adv)
       if self.LP:
         if attack_model.m.objVal < min_dist:
           min_dist = attack_model.m.objVal
@@ -466,7 +494,7 @@ class xgbMultiClassKantchelianAttack(object):
       print('Final Obj:', min_dist)
     else:
       final_adv_pred = self.model.predict(final_adv)
-      print('******************************* \nfinal adv dist:{}, final adv predict:{}, success:{}'.format(np.linalg.norm(final_adv-x,ord=self.order), final_adv_pred, final_adv_pred != label))
+      print('******* \nfinal adv dist:{}, final adv predict:{}, success:{}'.format(np.linalg.norm(final_adv-x,ord=self.order), final_adv_pred, final_adv_pred != label))
     return final_adv
 
 
@@ -490,9 +518,9 @@ def main(args):
   both_model = xgboost_wrapper(both_bst, binary=binary)
 
   if binary:
-    attack = xgbKantchelianAttack(model, args['num_threads'], args['json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
+    attack = xgbKantchelianAttack(both_model, args['num_threads'], args['json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
   else:
-    attack = xgbMultiClassKantchelianAttack(model, args['num_threads'], args['json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
+    attack = xgbMultiClassKantchelianAttack(both_model, args['num_threads'], args['json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
 
   test_data, test_labels = load_svmlight_file(args['data'], zero_based=True)
   test_data = test_data.toarray()
@@ -515,30 +543,53 @@ def main(args):
   adv1 = 0
   adv2 = 0
 
-  global_start = time.time()
   for n,idx in enumerate(samples):
-
-    #print('non-adv (',correct1, ',', correct2,')', ', adv (', adv1,',',adv2, ') - robustness(', avg_dist, ',', counter, ')')
-
-    if (model.predict(test_data[idx]) == test_labels[idx]):
-        correct1 += 1
-    else:
-        continue
-    if (model.predict(1-test_data[idx]) == test_labels[idx]):
-        correct2 += 1
 
     adv = attack.attack(test_data[idx], test_labels[idx])
 
-    if (model.predict(test_data[idx]) == test_labels[idx]) and (model.predict(adv) == test_labels[idx]):
+    yi = test_labels[idx]
+    xi = test_data[idx]
+    #Find flipped
+    flipped_xi = np.reshape(xi, (1, 1, 28, 28))
+    flipped_xi = torch.from_numpy(flipped_xi)
+    flipped_xi = hflip(flipped_xi)
+    flipped_xi = flipped_xi.cpu().detach().numpy()
+    flipped_xi = np.reshape(flipped_xi, (1, 28*28))
+    # Find inverted flipped
+    inv_flipped_xi = 1 - flipped_xi
+
+
+    # Default accuracy
+    if (model.predict(xi) == yi):
+        correct1 += 1
+
+    if not ((model.predict(xi) == yi and model.predict(1-xi) == yi)  or  (model.predict(xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(flipped_xi) == yi and model.predict(inv_flipped_xi) == yi) ):
+        print(f"Fail to classify example {n+1}. No need to attack.")
+        continue
+
+    correct2 += 1
+
+    xi = adv
+    # Find flipped
+    flipped_xi = np.reshape(xi, (1, 1, 28, 28))
+    flipped_xi = torch.from_numpy(flipped_xi)
+    flipped_xi = hflip(flipped_xi)
+    flipped_xi = flipped_xi.cpu().detach().numpy()
+    flipped_xi = np.reshape(flipped_xi, (1, 28*28))
+    # Find inverted flipped
+    inv_flipped_xi = 1 - flipped_xi
+
+    # Default adversarial accuracy
+    if model.predict(np.reshape(adv, (1, 28*28))) == yi:
         adv1 += 1
-    if model.predict(1-adv) == test_labels[idx]:
-        adv2 += 1
 
-    if (model.predict(test_data[idx]) == test_labels[idx]) and (model.predict(adv) != test_labels[idx]):
+    if  ((model.predict(xi) == yi and model.predict(1-xi) == yi)  or  (model.predict(xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(flipped_xi) == yi)  or  (model.predict(1-xi) == yi and model.predict(inv_flipped_xi) == yi)  or  (model.predict(flipped_xi) == yi and model.predict(inv_flipped_xi) == yi) ):
+        #adv_classified_correctly = True
+        print('*********!!!Attack report success but adv invalid!!!*********')
+        continue
+    else:
+      adv2 += 1
 
-      counter += 1
-    
-      # print(adv)
       diff = np.abs(adv-test_data[idx])
       if order == np.inf:
         dist = np.max(diff)
@@ -552,8 +603,8 @@ def main(args):
         print('0th feature set back to 0. adv[0]:', adv[0])
       avg_dist += dist
 
-  print(args['config_path'] + ' final non-adv (' + str(correct1) + ',' + str(correct2) + ')' + ', adv (' + str(adv1) + ',' + str(adv2) + ') - robustness( norm=' + str(avg_dist) + '/' + str(counter) + ') \n\n')
-  
+      print('final non-adv (' + str(correct2) + ')' + ', adv (' + str(adv2) + ') - robustness( norm=' + str(avg_dist) + '/' + str(adv2) + ', ' + str(n) + ') \n\n')
+  print('final non-adv (' + str(correct2) + ')' + ', adv (' + str(adv2) + ') - robustness( norm=' + str(avg_dist) + '/' + str(adv2) + ', ' + str(n) + ') \n\n')
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()

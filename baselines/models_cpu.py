@@ -83,14 +83,17 @@ class XGBoostModel(object):
         # Model
         self.model = xgb.Booster({'nthread': num_threads})
         self.model.load_model(model_path)
+        #self.model.load_config(model_path)
         
         # Inv model
         self.inv_model = xgb.Booster({'nthread': num_threads})
         self.inv_model.load_model(inv_model_path)
+        #self.inv_model.load_config(inv_model_path)
 
         # Both model
         self.both_model = xgb.Booster({'nthread': num_threads})
         self.both_model.load_model(both_model_path)
+        #self.both_model.load_config(both_model_path)
 
         self.is_binary = config['num_classes'] == 2
         self.num_classes = config['num_classes']
@@ -142,6 +145,8 @@ class XGBoostModel(object):
     def prefict_with_timer(self, dtest, **kargs):
         timestart = time.time()
         y_pred = self.model.predict(dtest, **kargs)
+        #y_pred = self.model.predict(dtest, iteration_range=(0, 300), **kargs)
+
         timeend = time.time()
         self.xgb_runtime += timeend - timestart
         return y_pred
@@ -149,6 +154,8 @@ class XGBoostModel(object):
     def inv_prefict_with_timer(self, dtest, **kargs):
         timestart = time.time()
         y_pred = self.inv_model.predict(dtest, **kargs)
+        #y_pred = self.model.predict(dtest, iteration_range=(0, 300), **kargs)
+
         timeend = time.time()
         self.xgb_runtime += timeend - timestart
         return y_pred
@@ -156,6 +163,8 @@ class XGBoostModel(object):
     def both_prefict_with_timer(self, dtest, **kargs):
         timestart = time.time()
         y_pred = self.both_model.predict(dtest, **kargs)
+        #y_pred = self.model.predict(dtest, iteration_range=(0, 300), **kargs)
+
         timeend = time.time()
         self.xgb_runtime += timeend - timestart
         return y_pred
@@ -172,15 +181,16 @@ class XGBoostTestLoader(object):
         # manually at the beginning.
         X, y = sklearn.datasets.load_svmlight_file(data_path, zero_based=True)
         X = X.toarray()
-        #print(X.shape)
+        #print('bla', X.shape)
         #print(y)
         #self.offset = config.get('offset', 0)
         self.offset = config.get('feature_start', 0)
-        #print(config.get('offset', 0))
+        #print(config.get('offset', 0), X.shape)
         #exit()
         self.len = min(X.shape[0] - self.offset, config['num_point'])
         #print(self.len)
-        self.X = X[self.offset : self.offset + self.len, 1:]
+        #self.X = X[self.offset : self.offset + self.len, 0:]##############
+        self.X = X[self.offset : self.offset + self.len, 1:]##############
         self.y = y[self.offset : self.offset + self.len].astype(int)
         #print(self.X.shape)
         #print(self.y.shape)

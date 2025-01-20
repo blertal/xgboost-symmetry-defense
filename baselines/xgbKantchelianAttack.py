@@ -15,16 +15,8 @@ import xgboost as xgb
 import time
 import argparse
 
-
 GUARD_VAL = 2e-7
 ROUND_DIGITS = 20
-
-
-
-def sigmoid(x):
-  return 1 / (1 + math.exp(-x))
-
-
 
 class xgboost_wrapper():
   def __init__(self, model, binary=False):
@@ -247,9 +239,6 @@ class xgbKantchelianAttack(object):
     for i in range(len(self.leaf_count)-1):
       leaf_vars = [self.llist[j] for j in range(self.leaf_count[i],self.leaf_count[i+1])]
       self.m.addConstr(LinExpr([1]*(self.leaf_count[i+1]-self.leaf_count[i]),leaf_vars)==1, name='leaf_sum_one_for_tree{}'.format(i))
-
-
-
 
     # node leaves constraints
     for j in range(len(self.node_list)):
@@ -477,22 +466,31 @@ def main(args):
   np.set_printoptions(precision=11)
   bst = xgb.Booster({'nthread': args['num_threads']})
   bst.load_model(args['model'])
+  inv_bst = xgb.Booster({'nthread': args['num_threads']})
+  inv_bst.load_model(args['inv_model'])
   binary = (args['num_classes'] == 2)
   order = args['order']
   if order == -1:
     order = np.inf
   model = xgboost_wrapper(bst, binary=binary)
+  inv_model = xgboost_wrapper(inv_bst, binary=binary)
 
   if binary:
     attack = xgbKantchelianAttack(model, args['num_threads'], args['json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
+    inv_attack = xgbKantchelianAttack(inv_model, args['num_threads'], args['inv_json'], order = order, guard_val=args['guard_val'], round_digits=args['round_digits'])
   else:
     attack = xgbMultiClassKantchelianAttack(model, args['num_threads'], args['json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
+    inv_attack = xgbMultiClassKantchelianAttack(inv_model, args['num_threads'], args['inv_json'], order = order, num_classes=args['num_classes'], guard_val=args['guard_val'], round_digits=args['round_digits'])
 
   test_data, test_labels = load_svmlight_file(args['data'], zero_based=True)
   test_data = test_data.toarray()
   if args['feature_start'] > 0:
     test_data = np.hstack((np.zeros((len(test_data),args['feature_start'])),test_data))
   test_labels = test_labels[:,np.newaxis].astype(int)
+  
+  test_data = test_data[:,1:]
+  #print(test_data.shape)
+  #exit()
 
   arr = np.arange(len(test_data))
   # Don't shuffle: Use the first k data.
@@ -501,6 +499,7 @@ def main(args):
   num_attacks = len(samples) # real number of attacks cannot be larger than test data size
   avg_dist = 0
   counter = 0
+  inv_counter = 0
   global_start = time.time()
   for n,idx in enumerate(samples):
     print("\n\n\n\n======== Point {} ({}/{}) starts =========".format(idx, n+1, num_attacks))
@@ -512,7 +511,12 @@ def main(args):
       print('prediction not correct, skip this one.')
       continue
     adv = attack.attack(test_data[idx], test_labels[idx])
-    # print(adv)
+  
+    inv_predict = inv_attack.check(adv, inv_attack.json_file)
+    
+    if test_labels[idx] == inv_predict:
+        inv_counter += 1
+    
     diff = np.abs(adv-test_data[idx])
     if order == np.inf:
       dist = np.max(diff)
@@ -534,7 +538,7 @@ def main(args):
   print('*******************************')
   print('*******************************')
   print('Results for config:', args['config_path'])
-  print('Num Attacked: %d Actual Examples Tested:%d' % (num_attacks, counter))
+  print('Num Attacked: %d Actual Examples Tested:%d Inv Counter:%d' % (num_attacks, counter, inv_counter))
   print('Norm(%d)=%.4f' % (args['order'], avg_dist / counter))
   print('Time per point: %.4f s' % ((time_end-global_start) / counter))
 
@@ -552,7 +556,9 @@ if __name__ == '__main__':
   args['order'] = config['norm_type']
   args['data'] = config['inputs']
   args['json'] = config['model']
+  args['inv_json'] = config['inv_model']
   args['model'] = config['model'].replace('.json', '.model')
+  args['inv_model'] = config['inv_model'].replace('.json', '.model')
   args['num_classes'] = config['num_classes']
   args['offset'] = config.get('offset', 0)
   args['num_attacks'] = config['num_point']

@@ -3,6 +3,10 @@
 ############################################################
 
 import numpy as np
+import torch
+from torchvision import transforms
+
+hflip = transforms.RandomHorizontalFlip(p=1.0)
 
 
 def sampling_attack(f, X, y, eps, n_trials):
@@ -16,7 +20,18 @@ def sampling_attack(f, X, y, eps, n_trials):
     for i in range(n_trials - 1):
         # let's keep them as real images, although not strictly needed
         perturbed_pts = np.clip(X + deltas[:, i], 0.0, 1.0)
-        f_x_vals[:, i] = f.fmargin(perturbed_pts)
+        
+        perturbed_pts_inv = 1.0 - perturbed_pts
+        
+        perturbed_pts_flipped = np.reshape(perturbed_pts, (1, 1, 28, 28))
+        perturbed_pts_flipped = torch.from_numpy(perturbed_pts_flipped)
+        perturbed_pts_flipped = hflip(perturbed_pts_flipped)
+        perturbed_pts_flipped = perturbed_pts_flipped.cpu().detach().numpy()
+        perturbed_pts_flipped = np.reshape(perturbed_pts_flipped, (28*28))
+        
+        perturbed_pts_inv_flipped = 1.0 - perturbed_pts_flipped
+
+        f_x_vals[:, i] = f.fmargin(perturbed_pts) + f.fmargin(perturbed_pts_inv) + f.fmargin(perturbed_pts_flipped) + f.fmargin(perturbed_pts_inv_flipped)
     # maybe in some corner cases, the predictions at the original point is more worst-case than the sampled points
     f_x_vals[:, n_trials - 1] = f.fmargin(X, np.ones(X.shape[0]))
 
@@ -47,13 +62,26 @@ def cube_attack(f, X, y, eps, n_trials, p=0.5, deltas_init=None, independent_del
 
     if deltas_init is None:
         deltas_init = np.zeros(size_delta)
+
+    X_flipped = np.reshape(X, (20, 1, 28, 28))
+    X_flipped = torch.from_numpy(X_flipped)
+    X_flipped = hflip(X_flipped)
+    X_flipped = X_flipped.cpu().detach().numpy()
+    X_flipped = np.reshape(X_flipped, (20,28*28))
     # this init is important, s.t. there is no violation of bounds
-    f_x_vals_min = f.fmargin(X, y)
+    f_x_vals_min = f.fmargin(X, y) + f.fmargin(1.0 - X, y) + f.fmargin(X_flipped, y) + f.fmargin(1.0 - X_flipped, y)
 
     if deltas_init is not None:  # evaluate the provided deltas and take them if they are better
         X_adv = np.clip(X + deltas_init, np.maximum(min_val, X - eps), np.minimum(max_val, X + eps))
-        deltas = X_adv - X  # because of the projection above, the new delta vector is not just +-eps
-        f_x_vals = f.fmargin(X_adv, y)
+
+        X_adv_flipped = np.reshape(X_adv, (20, 1, 28, 28))
+        X_adv_flipped = torch.from_numpy(X_adv_flipped)
+        X_adv_flipped = hflip(X_adv_flipped)
+        X_adv_flipped = X_adv_flipped.cpu().detach().numpy()
+        X_adv_flipped = np.reshape(X_adv_flipped, (20,28*28))
+    
+        deltas = X_adv - X  # because of the projection above, the new delta vector is not just +-eps #############
+        f_x_vals = f.fmargin(X_adv, y) + f.fmargin(1.0 - X_adv, y) + f.fmargin(X_adv_flipped, y) + f.fmargin(1.0 - X_adv_flipped, y)
         idx_improved = f_x_vals < f_x_vals_min
         f_x_vals_min = idx_improved * f_x_vals + ~idx_improved * f_x_vals_min
         deltas = idx_improved[:, None] * deltas_init + ~idx_improved[:, None] * deltas
@@ -67,7 +95,14 @@ def cube_attack(f, X, y, eps, n_trials, p=0.5, deltas_init=None, independent_del
         new_deltas = 2 * eps * new_deltas  # if eps is a vector, then it's an outer product num x 1 times 1 x dim
         X_adv = np.clip(X + deltas + new_deltas, np.maximum(min_val, X - eps), np.minimum(max_val, X + eps))
         new_deltas = X_adv - X  # because of the projection above, the new delta vector is not just +-eps
-        f_x_vals = f.fmargin(X_adv, y)
+        
+        X_adv_flipped = np.reshape(X_adv, (20, 1, 28, 28))
+        X_adv_flipped = torch.from_numpy(X_adv_flipped)
+        X_adv_flipped = hflip(X_adv_flipped)
+        X_adv_flipped = X_adv_flipped.cpu().detach().numpy()
+        X_adv_flipped = np.reshape(X_adv_flipped, (20,28*28))
+
+        f_x_vals = f.fmargin(X_adv, y) + f.fmargin(1.0 - X_adv, y) + f.fmargin(X_adv_flipped, y) + f.fmargin(1.0 - X_adv_flipped, y)
         idx_improved = f_x_vals < f_x_vals_min
         f_x_vals_min = idx_improved * f_x_vals + ~idx_improved * f_x_vals_min
         deltas = idx_improved[:, None] * new_deltas + ~idx_improved[:, None] * deltas
@@ -94,7 +129,13 @@ def binary_search_attack(attack, f, X, y, n_trials_attack, cleanup=True):
         deltas = idx_adv * new_deltas + ~idx_adv * deltas
         eps_step /= 2
 
-    yf = f.fmargin(X + deltas, y)
+    Xd_flipped = np.reshape(X + deltas, (20, 1, 28, 28))
+    Xd_flipped = torch.from_numpy(Xd_flipped)
+    Xd_flipped = hflip(Xd_flipped)
+    Xd_flipped = Xd_flipped.cpu().detach().numpy()
+    Xd_flipped = np.reshape(Xd_flipped, (20,28*28))
+
+    yf = f.fmargin(X + deltas, y) + f.fmargin(1.0 - (X + deltas), y) + f.fmargin(Xd_flipped, y) + f.fmargin(1.0 - Xd_flipped, y)
     print('yf after binary search: yf={}, Linf={}'.format(yf, np.abs(deltas).max(1)))
     if np.any(yf >= 0.0):
         print('The class was not changed (before cleanup)! Some bug apparently!')
@@ -106,11 +147,24 @@ def binary_search_attack(attack, f, X, y, n_trials_attack, cleanup=True):
         for i in range(dim):
             deltas_i_zeroed = np.copy(deltas)
             deltas_i_zeroed[:, i] = 0.0
-            f_x_vals = f.fmargin(X + deltas_i_zeroed, y)
+            
+            Xdz_flipped = np.reshape(X + deltas_i_zeroed, (1, 1, 28, 28))
+            Xdz_flipped = torch.from_numpy(Xdz_flipped)
+            Xdz_flipped = hflip(Xdz_flipped)
+            Xdz_flipped = Xdz_flipped.cpu().detach().numpy()
+            Xdz_flipped = np.reshape(Xdz_flipped, (28*28))
+
+            f_x_vals = f.fmargin(X + deltas_i_zeroed, y) + f.fmargin(1.0 - (X + deltas_i_zeroed), y) + f.fmargin(Xdz_flipped, y) + f.fmargin(1.0 - Xdz_flipped, y)
             idx_adv = f_x_vals < 0.0
             deltas = idx_adv[:, None] * deltas_i_zeroed + ~idx_adv[:, None] * deltas
 
-    yf = f.fmargin(X + deltas, y)
+    Xd_flipped = np.reshape(X + deltas, (20, 1, 28, 28))
+    Xd_flipped = torch.from_numpy(Xd_flipped)
+    Xd_flipped = hflip(Xd_flipped)
+    Xd_flipped = Xd_flipped.cpu().detach().numpy()
+    Xd_flipped = np.reshape(Xd_flipped, (20,28*28))
+
+    yf = f.fmargin(X + deltas, y) + f.fmargin(1.0 - (X + deltas), y) + f.fmargin(Xd_flipped, y) + f.fmargin(1.0 - Xd_flipped, y)
     print('yf after cleanup: yf={}, Linf={}'.format(yf, np.abs(deltas).max(1)))
     if np.any(yf >= 0.0):
         print('The class was not changed (after cleanup)! Some bug apparently!')
@@ -128,7 +182,13 @@ def coord_descent_attack_trees(f, X, y, eps, n_trials, deltas=None):
     if deltas is None:
         deltas = np.zeros((num, dim))
     # this init is important, s.t. there is no violation of bounds
-    f_x_vals_min = y * f.fmargin(np.clip(X + deltas, np.maximum(0.0, X - eps), np.minimum(1.0, X + eps)))
+    Xd_flipped = np.reshape(X + deltas, (1, 1, 28, 28))
+    Xd_flipped = torch.from_numpy(Xd_flipped)
+    Xd_flipped = hflip(Xd_flipped)
+    Xd_flipped = Xd_flipped.cpu().detach().numpy()
+    Xd_flipped = np.reshape(Xd_flipped, (28*28))
+
+    f_x_vals_min = y * [ f.fmargin(np.clip(X + deltas, np.maximum(0.0, X - eps), np.minimum(1.0, X + eps))) + f.fmargin(np.clip(1.0 - (X + deltas), np.maximum(0.0, X - eps), np.minimum(1.0, X + eps))) + f.fmargin(np.clip(Xd_flipped, np.maximum(0.0, X - eps), np.minimum(1.0, X + eps))) + f.fmargin(np.clip(1.0 - Xd_flipped, np.maximum(0.0, X - eps), np.minimum(1.0, X + eps)))]
 
     coords_per_tree = np.zeros(dim)
     for tree in f.trees:
